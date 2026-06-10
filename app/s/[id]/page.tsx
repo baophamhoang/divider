@@ -35,6 +35,7 @@ export default async function SharePage({ params }: { params: Promise<{ id: stri
       <ShareView
         name={session.name}
         balances={session.balances}
+        qrByName={session.qrLinks}
         defaultAsK={session.currency === 'k'}
         transfers={transfers.map((t) => ({
           id: t.id,

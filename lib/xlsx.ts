@@ -41,6 +41,9 @@ export type ParsedWorkbook = {
   warnings: ParseWarning[];
 };
 
+/** Tab name holding per-player payment QR links (row 1 = names, row 2 = URLs). */
+export const QR_SHEET_NAME = 'QR_SHEET';
+
 const TOTAL_LABEL = 'total';
 /** Above this magnitude we flag the residual; below is just rounding/rake noise. */
 const RESIDUAL_WARN_THRESHOLD = 0.5;
@@ -80,6 +83,14 @@ function normalizeLabel(v: unknown): string {
 
 function isNonEmptyText(v: unknown): boolean {
   return typeof v === 'string' && v.trim() !== '';
+}
+
+/** Canonical player-name key: trim + collapse internal whitespace. Shared by the
+ *  monthly parser and the QR parser so the name→QR join lines up. */
+function normalizeName(v: unknown): string {
+  return String(v ?? '')
+    .trim()
+    .replace(/\s+/g, ' ');
 }
 
 type Grid = (string | number | boolean | null)[][];
@@ -167,7 +178,7 @@ export function parseWorkbook(data: ArrayBuffer | Uint8Array, sheetName?: string
 
   for (let c = 1; c < namesRow.length; c++) {
     if (!isNonEmptyText(namesRow[c])) continue;
-    let name = String(namesRow[c]).trim().replace(/\s+/g, ' ');
+    let name = normalizeName(namesRow[c]);
     const net = parseLocaleNumber(totalRow[c]);
     if (Math.abs(net) < 1e-9) continue; // drop players who broke even / are blank
 
@@ -195,4 +206,54 @@ export function parseWorkbook(data: ArrayBuffer | Uint8Array, sheetName?: string
   }
 
   return { sheetNames, chosenSheet, players, residual, warnings };
+}
+
+/**
+ * Parse the dedicated `QR_SHEET` tab into a `name → payment-link` map.
+ *
+ * That tab is laid out differently from a monthly sheet: row 1 holds player
+ * NAMES starting at column A (no blank label column, no "Total" row), and row 2
+ * holds one payment URL (a Google Drive image link) per column. A name with a
+ * blank URL cell is simply skipped — QR is opt-in per player.
+ *
+ * We read the worksheet cells directly (not `sheet_to_json`) so we can pick up a
+ * cell's HYPERLINK target: Google Sheets often shows friendly text with the real
+ * URL hidden behind it, and `sheet_to_json` only returns the visible text.
+ *
+ * The URLs are NOT validated here — the server (`createSession`) re-validates with
+ * `isAllowedQrUrl` before persisting, since this is untrusted spreadsheet input.
+ * Returns an empty map (no warning) when the tab is absent: the feature is off.
+ */
+export function parseQrSheet(
+  data: ArrayBuffer | Uint8Array,
+  sheetName: string = QR_SHEET_NAME,
+): { qrByName: Record<string, string>; warnings: ParseWarning[] } {
+  const warnings: ParseWarning[] = [];
+  const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
+  const wb = XLSX.read(bytes, { type: 'array' });
+
+  const qrByName: Record<string, string> = {};
+  const ws = wb.SheetNames.includes(sheetName) ? wb.Sheets[sheetName] : undefined;
+  const ref = ws?.['!ref'];
+  if (!ws || !ref) return { qrByName, warnings };
+
+  const range = XLSX.utils.decode_range(ref);
+  const nameRow = range.s.r; // first used row = names
+  const urlRow = nameRow + 1; // next row = URLs
+
+  for (let c = range.s.c; c <= range.e.c; c++) {
+    const nameCell = ws[XLSX.utils.encode_cell({ r: nameRow, c })] as XLSX.CellObject | undefined;
+    const name = normalizeName(nameCell?.v);
+    if (!name) continue;
+
+    const urlCell = ws[XLSX.utils.encode_cell({ r: urlRow, c })] as XLSX.CellObject | undefined;
+    // Prefer the hyperlink target over the visible text.
+    const raw = urlCell?.l?.Target ?? (typeof urlCell?.v === 'string' ? urlCell.v : '');
+    const url = raw.trim();
+    if (!url) continue;
+
+    qrByName[name] = url;
+  }
+
+  return { qrByName, warnings };
 }

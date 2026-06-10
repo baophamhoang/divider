@@ -7,12 +7,15 @@ import { db } from '@/lib/db';
 import { sessions, transfers } from '@/lib/schema';
 import { computeSettlement, round2, type Balance } from '@/lib/settlement';
 import { newId } from '@/lib/id';
+import { isAllowedQrUrl } from '@/lib/qr';
 
 export type CreateSessionInput = {
   name: string;
   currency: string | null;
   sourceFilename: string | null;
   balances: Balance[];
+  /** Optional per-player payment QR: player name -> link (from the QR_SHEET tab). */
+  qrByName?: Record<string, string>;
 };
 
 /**
@@ -45,8 +48,20 @@ export async function createSession(input: CreateSessionInput): Promise<void> {
   const residual = round2(balances.reduce((s, b) => s + b.net, 0));
   const settlement = computeSettlement(balances);
 
+  // QR links are untrusted spreadsheet input: keep only entries for a known player
+  // whose URL passes the Google-host allowlist. Server Actions are POST-reachable,
+  // so we never trust the client's map verbatim.
+  const allowedNames = new Set(balances.map((b) => b.name));
+  const qrLinks: Record<string, string> = {};
+  if (input?.qrByName && typeof input.qrByName === 'object') {
+    for (const [rawName, rawUrl] of Object.entries(input.qrByName)) {
+      const name = String(rawName ?? '').trim().slice(0, 80);
+      if (allowedNames.has(name) && isAllowedQrUrl(rawUrl)) qrLinks[name] = rawUrl;
+    }
+  }
+
   const id = newId();
-  const sessionRow = { id, name, currency, sourceFilename, residual, balances };
+  const sessionRow = { id, name, currency, sourceFilename, residual, balances, qrLinks };
   const transferRows = settlement.map((t, i) => ({
     id: newId(),
     sessionId: id,

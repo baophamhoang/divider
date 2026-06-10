@@ -18,6 +18,13 @@ export const sessions = sqliteTable('sessions', {
     .$type<Balance[]>()
     .notNull()
     .default(sql`'[]'`),
+  // Optional per-player payment QR: player name -> Google Drive image URL. Pulled
+  // from the workbook's QR_SHEET tab at save time and never edited in-app, so it
+  // is a read-mostly snapshot loaded with the session — embedded like `balances`.
+  qrLinks: text('qr_links', { mode: 'json' })
+    .$type<Record<string, string>>()
+    .notNull()
+    .default(sql`'{}'`),
   createdAt: integer('created_at', { mode: 'timestamp' })
     .notNull()
     .default(sql`(unixepoch())`),

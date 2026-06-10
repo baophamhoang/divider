@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useEffect, useState, useTransition } from 'react';
 import { formatAmount, buildSummary } from '@/lib/format';
 import { toggleTransferPaid } from '@/app/actions';
+import { driveImageSrc } from '@/lib/qr';
 import type { Balance } from '@/lib/settlement';
 
 type T = { id: string; from: string; to: string; amount: number; paid: boolean };
@@ -13,11 +14,13 @@ const btnBase =
 export default function ShareView({
   name,
   balances,
+  qrByName,
   transfers: initial,
   defaultAsK,
 }: {
   name: string;
   balances: Balance[];
+  qrByName: Record<string, string>;
   transfers: T[];
   defaultAsK: boolean;
 }) {
@@ -25,6 +28,17 @@ export default function ShareView({
   const [transfers, setTransfers] = useState<T[]>(initial);
   const [, startTransition] = useTransition();
   const [copied, setCopied] = useState<null | 'link' | 'summary'>(null);
+  const [qrModal, setQrModal] = useState<{ name: string; url: string; amount: number } | null>(null);
+
+  // Close the QR popup on Escape.
+  useEffect(() => {
+    if (!qrModal) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setQrModal(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [qrModal]);
 
   const paidCount = transfers.filter((t) => t.paid).length;
   const total = transfers.length;
@@ -115,34 +129,47 @@ export default function ShareView({
           </p>
         ) : (
           <ul className="flex flex-col divide-y divide-zinc-100 dark:divide-zinc-800">
-            {transfers.map((t) => (
-              <li key={t.id}>
-                <label className="flex cursor-pointer items-center gap-3 py-3">
-                  <input
-                    type="checkbox"
-                    checked={t.paid}
-                    onChange={(e) => toggle(t.id, e.target.checked)}
-                    className="h-5 w-5 shrink-0 accent-emerald-600"
-                  />
-                  <span
-                    className={`flex-1 text-sm ${
-                      t.paid ? 'text-zinc-400 line-through dark:text-zinc-600' : ''
-                    }`}
-                  >
-                    <b>{t.from}</b> <span className="text-zinc-400">trả</span> <b>{t.to}</b>
-                  </span>
-                  <span
-                    className={`shrink-0 font-semibold tabular-nums ${
-                      t.paid
-                        ? 'text-zinc-400 line-through dark:text-zinc-600'
-                        : 'text-emerald-600 dark:text-emerald-400'
-                    }`}
-                  >
-                    {formatAmount(t.amount, asK)}
-                  </span>
-                </label>
-              </li>
-            ))}
+            {transfers.map((t) => {
+              const qr = qrByName[t.to];
+              return (
+                <li key={t.id} className="flex items-center gap-2">
+                  <label className="flex flex-1 cursor-pointer items-center gap-3 py-3">
+                    <input
+                      type="checkbox"
+                      checked={t.paid}
+                      onChange={(e) => toggle(t.id, e.target.checked)}
+                      className="h-5 w-5 shrink-0 accent-emerald-600"
+                    />
+                    <span
+                      className={`flex-1 text-sm ${
+                        t.paid ? 'text-zinc-400 line-through dark:text-zinc-600' : ''
+                      }`}
+                    >
+                      <b>{t.from}</b> <span className="text-zinc-400">trả</span> <b>{t.to}</b>
+                    </span>
+                    <span
+                      className={`shrink-0 font-semibold tabular-nums ${
+                        t.paid
+                          ? 'text-zinc-400 line-through dark:text-zinc-600'
+                          : 'text-emerald-600 dark:text-emerald-400'
+                      }`}
+                    >
+                      {formatAmount(t.amount, asK)}
+                    </span>
+                  </label>
+                  {qr && (
+                    <button
+                      type="button"
+                      onClick={() => setQrModal({ name: t.to, url: qr, amount: t.amount })}
+                      className="shrink-0 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-xs font-semibold text-emerald-700 transition-colors hover:bg-emerald-100 dark:border-emerald-800/60 dark:bg-emerald-950/40 dark:text-emerald-300 dark:hover:bg-emerald-900/40"
+                      aria-label={`Xem QR chuyển tiền cho ${t.to}`}
+                    >
+                      Show QR
+                    </button>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         )}
       </div>
@@ -172,6 +199,76 @@ export default function ShareView({
           </div>
         </details>
       )}
+
+      {qrModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label={`QR chuyển tiền cho ${qrModal.name}`}
+          onClick={() => setQrModal(null)}
+        >
+          <div
+            className="w-full max-w-xs rounded-2xl bg-white p-5 shadow-xl dark:bg-zinc-900"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-3 flex items-start justify-between gap-2">
+              <h3 className="text-sm font-semibold">
+                Chuyển cho{' '}
+                <span className="text-emerald-600 dark:text-emerald-400">{qrModal.name}</span>
+              </h3>
+              <button
+                type="button"
+                onClick={() => setQrModal(null)}
+                aria-label="Đóng"
+                className="-mr-1 -mt-1 shrink-0 rounded-lg px-2 py-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+              >
+                ✕
+              </button>
+            </div>
+            <p className="mb-3 text-sm text-zinc-500 dark:text-zinc-400">
+              Số tiền:{' '}
+              <b className="tabular-nums text-emerald-600 dark:text-emerald-400">
+                {formatAmount(qrModal.amount, asK)}
+              </b>
+            </p>
+            <QrImage url={qrModal.url} name={qrModal.name} />
+            <a
+              href={qrModal.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-3 block text-center text-sm text-emerald-600 hover:underline dark:text-emerald-400"
+            >
+              Mở trong new tab ↗
+            </a>
+          </div>
+        </div>
+      )}
     </div>
+  );
+}
+
+/** QR image with a graceful fallback when Drive won't serve it inline. */
+function QrImage({ url, name }: { url: string; name: string }) {
+  const [errored, setErrored] = useState(false);
+  const src = driveImageSrc(url);
+  if (!src || errored) {
+    return (
+      <div className="rounded-xl border border-dashed border-zinc-300 p-6 text-center text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
+        Không hiển thị được ảnh QR ở đây — bấm link bên dưới để mở.
+      </div>
+    );
+  }
+  return (
+    // Intentionally a raw <img>, not next/image: the src is an untrusted remote URL;
+    // next/image would fetch it server-side (SSRF) and require remotePatterns config.
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={src}
+      alt={`Mã QR chuyển tiền cho ${name}`}
+      referrerPolicy="no-referrer"
+      onError={() => setErrored(true)}
+      className="mx-auto block w-full max-h-[75vh] rounded-xl object-contain"
+    />
   );
 }
