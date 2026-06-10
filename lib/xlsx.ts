@@ -1,5 +1,5 @@
 /**
- * Parse a group's poker ledger `.xlsx` into per-player net balances.
+ * Parse a group's ledger `.xlsx` into per-player net balances.
  *
  * The sheet is laid out HORIZONTALLY:
  *   - one header row of player NAMES (one per column; column A of that row is blank),

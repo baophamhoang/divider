@@ -28,7 +28,7 @@
  *     the strictly minimum number of transactions is NP-hard (it is the subset-sum /
  *     partition problem in disguise), so we don't attempt it. For real friend-group
  *     data the greedy result is at or very near optimal, and it's the same approach
- *     already battle-tested in the sibling `pokertime` app.
+ *     already battle-tested in the sibling app.
  *
  * RESIDUAL & FLOATING POINT:
  *   Game sheets contain half-units like 239.5 / -619.5, and the column may not sum to

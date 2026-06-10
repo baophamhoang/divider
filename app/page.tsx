@@ -19,7 +19,7 @@ export default async function Home() {
       <header className="mb-8 flex items-end justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
-            <span className="text-emerald-600 dark:text-emerald-400">♠</span> Chia tiền Poker
+            <span className="text-emerald-600 dark:text-emerald-400"></span> Chia tiền
           </h1>
           <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
             Upload sheet nợ/lời → chia tiền ít lượt chuyển nhất.

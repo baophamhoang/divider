@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Chia tiền Poker",
+  title: "Chia tiền",
   description: "Import sheet nợ/lời và chia tiền tối thiểu số lượt chuyển — không cần trung gian.",
 };
 

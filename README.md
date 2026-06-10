@@ -1,6 +1,6 @@
-# Divider — poker debt settlement
+# Divider — debt settlement
 
-Import a group's poker ledger (`.xlsx`), and split the money so everyone pays **each other directly** with the **fewest transfers possible** — no middleman collecting and redistributing. Each settlement gets a shareable link where everyone can tick off transfers as "paid".
+Import a group's ledger (`.xlsx`), and split the money so everyone pays **each other directly** with the **fewest transfers possible** — no middleman collecting and redistributing. Each settlement gets a shareable link where everyone can tick off transfers as "paid".
 
 Built with Next.js 16, React 19, Tailwind v4, Turso (libSQL) + Drizzle. UI is in Vietnamese.
 
@@ -27,7 +27,7 @@ For a zero-sum game these sum to 0. A small non-zero **residual** (rounding, rak
 ### Why this shape
 
 - Every iteration zeroes out at least one player, so it emits **at most n−1 transfers** — far fewer than the up-to `n(n−1)/2` you'd get if everyone paid everyone. That's the whole point of "no middleman".
-- It is a well-known **greedy heuristic**, not a provably optimal solver. Finding the strict minimum number of transactions is NP-hard (it's the subset-sum / partition problem in disguise), so we don't attempt it. For real friend-group data the greedy result is at or very near optimal, and it's the same approach already used in the sibling `pokertime` app.
+- It is a well-known **greedy heuristic**, not a provably optimal solver. Finding the strict minimum number of transactions is NP-hard (it's the subset-sum / partition problem in disguise), so we don't attempt it. For real friend-group data the greedy result is at or very near optimal, and it's the same approach already used in the sibling app.
 
 ### Floating point & residual
 
