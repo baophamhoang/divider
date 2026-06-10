@@ -1,0 +1,1 @@
+ALTER TABLE `sessions` ADD `qr_links` text DEFAULT '{}' NOT NULL;

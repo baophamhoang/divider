@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import * as XLSX from 'xlsx';
-import { parseWorkbook, parseLocaleNumber } from './xlsx';
+import { parseWorkbook, parseLocaleNumber, parseQrSheet, QR_SHEET_NAME } from './xlsx';
 
 type Row = (string | number | null)[];
 
@@ -129,5 +129,53 @@ describe('parseWorkbook', () => {
     const res = parseWorkbook(bytes);
     expect(res.players.map((p) => p.name)).toEqual(['Hoài', 'Hoài (2)']);
     expect(res.warnings.map((w) => w.code)).toContain('DUP_NAMES');
+  });
+});
+
+describe('parseQrSheet', () => {
+  it('maps names (row 1) to URLs (row 2), preferring the hyperlink target', () => {
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet([
+      ['Bảo MU', 'Hoài', 'Tô', 'Khoa Kano'],
+      [
+        'https://drive.google.com/file/d/AAA/view',
+        'xem QR', // friendly text — the real URL lives in the hyperlink target
+        null, // no URL → skipped
+        'https://drive.google.com/file/d/DDD/view',
+      ],
+    ]);
+    (ws['B2'] as XLSX.CellObject).l = { Target: 'https://drive.google.com/file/d/BBB/view' };
+    XLSX.utils.book_append_sheet(wb, ws, QR_SHEET_NAME);
+    const bytes = new Uint8Array(XLSX.write(wb, { type: 'array', bookType: 'xlsx' }));
+
+    expect(parseQrSheet(bytes).qrByName).toEqual({
+      'Bảo MU': 'https://drive.google.com/file/d/AAA/view',
+      Hoài: 'https://drive.google.com/file/d/BBB/view',
+      'Khoa Kano': 'https://drive.google.com/file/d/DDD/view',
+    });
+  });
+
+  it('normalizes names (trim + collapse whitespace)', () => {
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet([['  Bảo   MU '], ['https://drive.google.com/file/d/AAA/view']]);
+    XLSX.utils.book_append_sheet(wb, ws, QR_SHEET_NAME);
+    const bytes = new Uint8Array(XLSX.write(wb, { type: 'array', bookType: 'xlsx' }));
+
+    expect(parseQrSheet(bytes).qrByName).toEqual({ 'Bảo MU': 'https://drive.google.com/file/d/AAA/view' });
+  });
+
+  it('returns an empty map when there is no QR_SHEET tab', () => {
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(
+      wb,
+      XLSX.utils.aoa_to_sheet([
+        [null, 'A'],
+        ['Total', 10],
+      ]),
+      'Sheet1',
+    );
+    const bytes = new Uint8Array(XLSX.write(wb, { type: 'array', bookType: 'xlsx' }));
+
+    expect(parseQrSheet(bytes).qrByName).toEqual({});
   });
 });

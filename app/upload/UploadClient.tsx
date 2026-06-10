@@ -1,7 +1,13 @@
 'use client';
 
 import { useMemo, useRef, useState, useTransition } from 'react';
-import { parseWorkbook, parseLocaleNumber, type ParseWarning, type ParsedWorkbook } from '@/lib/xlsx';
+import {
+  parseWorkbook,
+  parseQrSheet,
+  parseLocaleNumber,
+  QR_SHEET_NAME,
+  type ParseWarning,
+} from '@/lib/xlsx';
 import { computeSettlement, round2, type Balance } from '@/lib/settlement';
 import { formatAmount } from '@/lib/format';
 import { createSession } from '@/app/actions';
@@ -25,10 +31,12 @@ function warnClass(code: ParseWarning['code']): string {
 export default function UploadClient() {
   const bytesRef = useRef<ArrayBuffer | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState(false);
   const [sheetNames, setSheetNames] = useState<string[]>([]);
   const [chosenSheet, setChosenSheet] = useState('');
   const [warnings, setWarnings] = useState<ParseWarning[]>([]);
   const [rows, setRows] = useState<Row[]>([]);
+  const [qrByName, setQrByName] = useState<Record<string, string>>({});
   const [sessionName, setSessionName] = useState('');
   const [asK, setAsK] = useState(false);
   const [parseError, setParseError] = useState<string | null>(null);
@@ -45,12 +53,31 @@ export default function UploadClient() {
   const residual = useMemo(() => round2(balances.reduce((s, b) => s + b.net, 0)), [balances]);
   const transfers = useMemo(() => computeSettlement(balances), [balances]);
   const balanced = Math.abs(residual) <= 0.5;
+  const qrCount = useMemo(
+    () => rows.filter((r) => qrByName[r.name.trim().replace(/\s+/g, ' ')]).length,
+    [rows, qrByName],
+  );
 
-  function applyParse(res: ParsedWorkbook) {
-    setSheetNames(res.sheetNames);
-    setChosenSheet(res.chosenSheet);
-    setWarnings(res.warnings);
-    setRows(res.players.map((p) => ({ name: p.name, netText: String(p.net) })));
+  // Parse one chosen sheet into the editable player list. The QR map is re-read
+  // here (cheap) so the name→QR join always matches the sheet just selected.
+  function selectSheet(sheet: string) {
+    if (!bytesRef.current) return;
+    setParseError(null);
+    try {
+      const res = parseWorkbook(bytesRef.current, sheet);
+      const { qrByName: qr } = parseQrSheet(bytesRef.current);
+      setChosenSheet(res.chosenSheet);
+      setQrByName(qr);
+      setRows(res.players.map((p) => ({ name: p.name, netText: String(p.net) })));
+
+      // Drop the MULTI_SHEET hint (the explicit chooser replaces it). We do NOT warn
+      // about QR names missing from this sheet — the QR tab is a global roster, so a
+      // given month legitimately won't include everyone; the "· N có QR" count is the
+      // signal instead.
+      setWarnings(res.warnings.filter((w) => w.code !== 'MULTI_SHEET'));
+    } catch {
+      setParseError('Không đọc được sheet này.');
+    }
   }
 
   async function handleFile(file: File) {
@@ -59,25 +86,33 @@ export default function UploadClient() {
     try {
       const buf = await file.arrayBuffer();
       bytesRef.current = buf;
-      applyParse(parseWorkbook(buf));
+      // Settlement sheets = every tab except the QR tab. The user picks which one.
+      const monthly = parseWorkbook(buf).sheetNames.filter((n) => n !== QR_SHEET_NAME);
+      setSheetNames(monthly);
       setFileName(file.name);
       const base = file.name.replace(/\.(xlsx|xls)$/i, '').trim();
       setSessionName(base || defaultName());
+
+      if (monthly.length === 1) {
+        selectSheet(monthly[0]); // only one settlement sheet → no need to choose
+      } else {
+        // 0 or many: don't auto-parse — the chooser (or an error) drives the next step.
+        setChosenSheet('');
+        setRows([]);
+        setQrByName({});
+        setWarnings(
+          monthly.length === 0
+            ? [{ code: 'NO_TOTAL_ROW', message: 'File không có sheet chia tiền nào (thiếu hàng "Total").' }]
+            : [],
+        );
+      }
     } catch {
       setParseError('Không đọc được file. Đảm bảo đây là file .xlsx hợp lệ.');
       setRows([]);
       setSheetNames([]);
       setWarnings([]);
-    }
-  }
-
-  function reparse(sheet: string) {
-    if (!bytesRef.current) return;
-    setParseError(null);
-    try {
-      applyParse(parseWorkbook(bytesRef.current, sheet));
-    } catch {
-      setParseError('Không đọc được sheet này.');
+      setQrByName({});
+      setChosenSheet('');
     }
   }
 
@@ -87,6 +122,10 @@ export default function UploadClient() {
       setSaveError('Chưa có số liệu người chơi hợp lệ.');
       return;
     }
+    if (!balanced) {
+      setSaveError('Tổng net phải ≈ 0 mới lưu được — kiểm tra lại số liệu.');
+      return;
+    }
     startTransition(async () => {
       try {
         await createSession({
@@ -94,6 +133,7 @@ export default function UploadClient() {
           currency: asK ? 'k' : null,
           sourceFilename: fileName,
           balances,
+          qrByName,
         });
       } catch (e) {
         const digest = (e as { digest?: string })?.digest;
@@ -106,7 +146,24 @@ export default function UploadClient() {
   return (
     <div className="flex flex-col gap-5">
       {/* File picker */}
-      <label className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-zinc-300 bg-white px-6 py-8 text-center transition-colors hover:border-emerald-400 hover:bg-emerald-50/30 dark:border-zinc-700 dark:bg-zinc-900 dark:hover:border-emerald-700/60 dark:hover:bg-emerald-950/20">
+      <label
+        onDragOver={(e) => {
+          e.preventDefault();
+          setDragOver(true);
+        }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDragOver(false);
+          const f = e.dataTransfer.files?.[0];
+          if (f) handleFile(f);
+        }}
+        className={`flex cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed px-6 py-8 text-center transition-colors ${
+          dragOver
+            ? 'border-emerald-500 bg-emerald-50/60 dark:border-emerald-600 dark:bg-emerald-950/30'
+            : 'border-zinc-300 bg-white hover:border-emerald-400 hover:bg-emerald-50/30 dark:border-zinc-700 dark:bg-zinc-900 dark:hover:border-emerald-700/60 dark:hover:bg-emerald-950/20'
+        }`}
+      >
         <span className="text-2xl">📄</span>
         <span className="text-sm font-medium">{fileName ?? 'Chọn file .xlsx'}</span>
         <span className="text-xs text-zinc-500 dark:text-zinc-400">
@@ -125,20 +182,30 @@ export default function UploadClient() {
       </label>
 
       {sheetNames.length > 1 && (
-        <label className="flex items-center gap-3 text-sm">
-          <span className="text-zinc-500 dark:text-zinc-400">Sheet:</span>
-          <select
-            value={chosenSheet}
-            onChange={(e) => reparse(e.target.value)}
-            className={inputClass + ' w-full max-w-xs'}
-          >
+        <div className="flex flex-col gap-2 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+          <span className="text-sm font-medium">Chọn sheet để chia tiền</span>
+          <div className="flex flex-wrap gap-2">
             {sheetNames.map((n) => (
-              <option key={n} value={n}>
+              <button
+                key={n}
+                type="button"
+                onClick={() => selectSheet(n)}
+                className={`rounded-xl border px-3.5 py-2 text-sm font-medium transition-colors ${
+                  chosenSheet === n
+                    ? 'border-emerald-500 bg-emerald-600 text-white'
+                    : 'border-zinc-300 bg-white text-zinc-700 hover:border-emerald-400 hover:bg-emerald-50/40 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:border-emerald-700/60 dark:hover:bg-emerald-950/20'
+                }`}
+              >
                 {n}
-              </option>
+              </button>
             ))}
-          </select>
-        </label>
+          </div>
+          {!chosenSheet && (
+            <span className="text-xs text-zinc-500 dark:text-zinc-400">
+              Bấm một sheet để xem danh sách người chơi.
+            </span>
+          )}
+        </div>
       )}
 
       {parseError && (
@@ -182,7 +249,12 @@ export default function UploadClient() {
           {/* Editable players */}
           <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
             <div className="mb-2 flex items-center justify-between">
-              <h2 className="text-sm font-semibold">Người chơi ({rows.length})</h2>
+              <h2 className="text-sm font-semibold">
+                Người chơi ({rows.length})
+                {qrCount > 0 && (
+                  <span className="ml-1 font-normal text-zinc-400">· {qrCount} có QR</span>
+                )}
+              </h2>
               <button
                 type="button"
                 onClick={() => setRows((r) => [...r, { name: '', netText: '' }])}
@@ -262,10 +334,16 @@ export default function UploadClient() {
             </div>
           )}
 
+          {!balanced && balances.length > 0 && (
+            <p className="text-center text-xs text-amber-600 dark:text-amber-400">
+              Tổng net phải ≈ 0 mới lưu được (hiện {formatAmount(residual, asK)}).
+            </p>
+          )}
+
           <button
             type="button"
             onClick={onSave}
-            disabled={pending || balances.length === 0}
+            disabled={pending || balances.length === 0 || !balanced}
             className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-3 font-medium text-white shadow-sm transition-colors hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {pending ? 'Đang lưu…' : 'Lưu & tạo link chia tiền'}
