@@ -9,7 +9,7 @@ import { createSession } from '@/app/actions';
 type Row = { name: string; netText: string };
 
 const inputClass =
-  'w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-900';
+  'rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-900';
 
 function defaultName(): string {
   return `Ván ${new Intl.DateTimeFormat('vi-VN').format(new Date())}`;
@@ -130,7 +130,7 @@ export default function UploadClient() {
           <select
             value={chosenSheet}
             onChange={(e) => reparse(e.target.value)}
-            className={inputClass + ' max-w-xs'}
+            className={inputClass + ' w-full max-w-xs'}
           >
             {sheetNames.map((n) => (
               <option key={n} value={n}>
@@ -163,7 +163,7 @@ export default function UploadClient() {
                 value={sessionName}
                 onChange={(e) => setSessionName(e.target.value)}
                 placeholder={defaultName()}
-                className={inputClass}
+                className={inputClass + ' w-full'}
               />
             </label>
             <label className="flex items-center gap-2 text-sm">
@@ -200,7 +200,7 @@ export default function UploadClient() {
                       setRows((r) => r.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))
                     }
                     placeholder="Tên"
-                    className={inputClass + ' flex-1'}
+                    className={inputClass + ' min-w-0 flex-1'}
                   />
                   <input
                     value={row.netText}
